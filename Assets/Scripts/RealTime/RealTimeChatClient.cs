@@ -13,14 +13,15 @@ using XPlan.OpenAI;
 
 public static class AudioMsgTypes
 {
-    public const string Start               = "audio.Start";            // server -> client
-    public const string Finish              = "audio.Finish";           // server -> client
-    public const string Logging             = "audio.Logging";          // server -> client
+    public const string Start                   = "audio.Start";                    // server -> client
+    public const string Finish                  = "audio.Finish";                   // server -> client
+    public const string Logging                 = "audio.Logging";                  // server -> client
 
-    public const string Send                = "audio.Send";             // client -> server
-    public const string InterruptReceive    = "audio.InterruptReceive"; // client -> server
-    public const string ReceiveAudio        = "audio.ReceiveAudio";     // server -> client
-    public const string ReceiveText         = "audio.ReceiveText";      // server -> client
+    public const string Send                    = "audio.Send";                     // client -> server
+    public const string InterruptReceive        = "audio.InterruptReceive";         // client -> server
+    public const string ReceiveAssistantAudio   = "audio.ReceiveAssistantAudio";    // server -> client
+    public const string ReceiveAssistantText    = "audio.ReceiveAssistantText";     // server -> client
+    public const string ReceiveUserText         = "audio.ReceiveUserText";          // server -> client
 }
 
 // 依照Server定義決定
@@ -34,8 +35,9 @@ public class AIMessage
 public class RealTimeChatClient : MonoBehaviour
 {
     [Header("Wiring")]
-    [SerializeField] private Text aiText;   // 顯示 AI 回覆(含逐字&最終)
-    [SerializeField] private Button micBtn; // 點擊=切換；長按=Push-To-Talk
+    [SerializeField] private Text aiText;       // 顯示 AI 回覆(含逐字&最終)
+    [SerializeField] private Text userText;     // 顯示 AI 回覆(含逐字&最終)
+    [SerializeField] private Button micBtn;     // 點擊=切換；長按=Push-To-Talk
 
     [Tooltip("Mic device name. Leave empty to use default device.")]
     public string microphoneDevice = string.Empty; // 麥克風 (2- Usb Audio Device)
@@ -232,6 +234,14 @@ public class RealTimeChatClient : MonoBehaviour
 
         // 逐字：即時顯示；最終：覆蓋並可加結尾標記
         aiText.text =  text + "▌"; // 小光標感
+    }
+
+    private void HandleUserTranscript(string text)
+    {
+        if (userText == null) return;
+
+        // 逐字：即時顯示；最終：覆蓋並可加結尾標記
+        userText.text = text;
     }
 
     private void HandleAIAudio(byte[] bytes)
@@ -665,14 +675,14 @@ public class RealTimeChatClient : MonoBehaviour
                 EmitOnMain(() => HandleAIResposeFinish());
                 break;
 
-            case AudioMsgTypes.ReceiveText:
+            case AudioMsgTypes.ReceiveAssistantText:
                 {
                     var payload = env.Payload ?? "";
                     EmitOnMain(() => HandleAITranscript(payload.ToString()));
                     break;
                 }
 
-            case AudioMsgTypes.ReceiveAudio:
+            case AudioMsgTypes.ReceiveAssistantAudio:
                 {
                     var payload = env.Payload ?? "";
                     try
@@ -685,6 +695,12 @@ public class RealTimeChatClient : MonoBehaviour
                     break;
                 }
 
+            case AudioMsgTypes.ReceiveUserText:
+                {
+                    var payload = env.Payload ?? "";
+                    EmitOnMain(() => HandleUserTranscript(payload.ToString()));
+                    break;
+                }
             case AudioMsgTypes.Logging:
                 {
                     var payload = env.Payload ?? "";
