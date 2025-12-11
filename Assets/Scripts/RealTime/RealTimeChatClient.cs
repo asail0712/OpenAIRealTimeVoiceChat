@@ -52,6 +52,10 @@ namespace XPlan.OpenAI
         [Tooltip("Preferred sample rate for mic capture. Actual mic rate comes from _micClip.frequency.")]
         public int sampleRate = 24000;
 
+        [Header("Audio Settings")]
+        [Tooltip("Preferred sample rate for mic capture. Actual mic rate comes from _micClip.frequency.")]
+        public bool bAutoConnect = false;
+
         // Send loop flags
         private volatile bool bStreamingMic;
 
@@ -151,8 +155,11 @@ namespace XPlan.OpenAI
 
         private async void Start()
         {
-            // 連 WebSocket
-            await ConnectAsync();
+            if(bAutoConnect)
+            {
+                // 連 WebSocket
+                await ConnectAsync();
+            }
         }
 
         private void OnDestroy()
@@ -569,6 +576,28 @@ namespace XPlan.OpenAI
         // WebSocket client
         // ===============================
         public bool IsConnected() => _ws != null && _ws.State == WebSocketState.Open;
+        
+        // =============== Public Connect API ===============
+        public async Task Connect()
+        {
+            // 已連線就不要再連一次
+            if (IsConnected())
+            {
+                Debug.Log("[WS] Already connected.");
+                return;
+            }
+
+            // 清掉舊的連線資源（若有）
+            try { _cts?.Cancel(); } catch { }
+            try { _ws?.Abort(); } catch { }
+            try { _ws?.Dispose(); } catch { }
+
+            _cts = null;
+            _ws = null;
+
+            // 實際執行連線流程
+            await ConnectAsync();
+        }
 
         private async Task ConnectAsync()
         {
@@ -783,7 +812,7 @@ namespace XPlan.OpenAI
 
                 var bytes = Encoding.UTF8.GetBytes(json);
 
-                await SendAsync(bytes, WebSocketMessageType.Text);
+                await SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text);
             }
             catch (Exception ex)
             {

@@ -6,6 +6,7 @@ namespace XPlan.OpenAI
     public interface IAIRealTimeChat
     {
         //**************** Connect ***************
+        Task Connect();
         void AddHeader(string key, string value);
 
         event Action onConnected;            // 連線成功
