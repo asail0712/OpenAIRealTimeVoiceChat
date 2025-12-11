@@ -9,13 +9,6 @@ using System.Threading.Tasks;
 
 namespace XPlan.OpenAI
 {
-    public enum DebugLevel
-    {
-        Log,
-        Warning,
-        Error,
-    }
-
     /// <summary>
     /// Refactored & trimmed version based on user's original file.
     /// Focus: clear responsibilities, minimal state, safe defaults, and readable flow.

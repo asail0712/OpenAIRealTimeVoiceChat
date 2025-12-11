@@ -1161,6 +1161,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1951665199}
   - component: {fileID: 1951665200}
+  - component: {fileID: 1951665201}
   m_Layer: 0
   m_Name: RealTimeChatClient
   m_TagString: Untagged
@@ -1195,14 +1196,27 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 43718ad8ad79a3540bd7bb1131899516, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  aiText: {fileID: 748965555}
-  userText: {fileID: 2062548339}
-  micBtn: {fileID: 1118283998}
   microphoneDevice: "\u9EA5\u514B\u98A8 (2- Usb Audio Device)"
-  interruptAIBtn: {fileID: 1796693925}
   playbackSource: {fileID: 0}
   sampleRate: 24000
   wsUrl: ws://localhost:5246/ws?uid=xxx
+--- !u!114 &1951665201
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1951665197}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c579a14204a1aa64a8995dc667598ee8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  aiSpeechText: {fileID: 748965555}
+  userSpeechText: {fileID: 2062548339}
+  speakBtn: {fileID: 1118283998}
+  interruptBtn: {fileID: 1796693925}
+  speakText: {fileID: 1904816778}
 --- !u!1 &2062548337
 GameObject:
   m_ObjectHideFlags: 0
