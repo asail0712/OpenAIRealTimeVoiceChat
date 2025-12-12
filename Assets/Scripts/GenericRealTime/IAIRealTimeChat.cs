@@ -7,6 +7,7 @@ namespace XPlan.OpenAI
     {
         //**************** Connect ***************
         Task Connect();
+        Task Disconnect();
         void AddHeader(string key, string value);
 
         event Action onConnected;            // 連線成功
@@ -19,6 +20,8 @@ namespace XPlan.OpenAI
         Task InterruptChat();
 
         //**************** Callback ***************
+        event Action aiResponseStart;
+        event Action aiResponseFinish;
         event Action<string> userTextDelta;
         event Action<string> aiTextDelta;
         event Action<string> userTextDone;

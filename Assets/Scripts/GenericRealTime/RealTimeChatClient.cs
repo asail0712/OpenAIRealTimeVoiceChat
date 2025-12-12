@@ -102,6 +102,8 @@ namespace XPlan.OpenAI
         // ===============================
         // Internals - Mic capture/send
         // ===============================
+        public event Action aiResponseStart;
+        public event Action aiResponseFinish;
         public event Action<string> userTextDelta;
         public event Action<string> aiTextDelta;
         public event Action<string> userTextDone;
@@ -199,12 +201,14 @@ namespace XPlan.OpenAI
 
         private void HandleAIResposeStart()
         {
+            aiResponseStart?.Invoke();
             // 交給 audioPlayer
             audioPlayer?.OnAIResponseStart(autoPlay: false); // 這裡先只清 buffer，不自動播放
         }
 
         private void HandleAIResposeFinish()
         {
+            aiResponseFinish?.Invoke();
             audioPlayer?.OnAIResponseFinish(stopImmediately: false);
         }
 
@@ -724,6 +728,71 @@ namespace XPlan.OpenAI
             {
                 Debug.LogWarning($"[WS] Serialize error: {ex.Message}");
             }
+        }
+
+        public async Task Disconnect()
+        {
+            // 1. 停掉麥克風相關
+            bStreamingMic = false;
+
+            if (_micClip != null && Microphone.IsRecording(microphoneDevice))
+            {
+                try
+                {
+                    Microphone.End(microphoneDevice);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[Mic] Stop error: {ex.Message}");
+                }
+            }
+
+            // 2. 停掉背景 Task（ReceiveLoop / TX Sender）
+            try
+            {
+                _txChan?.Writer.TryComplete(); // 讓 SendMicLoop 的 sender 結束
+            }
+            catch { }
+
+            try
+            {
+                _cts?.Cancel();
+            }
+            catch { }
+
+            // 3. 優雅關閉 WebSocket
+            if (_ws != null)
+            {
+                try
+                {
+                    if (_ws.State == WebSocketState.Open ||
+                        _ws.State == WebSocketState.CloseReceived)
+                    {
+                        await _ws.CloseAsync(
+                            WebSocketCloseStatus.NormalClosure,
+                            "client_disconnect",
+                            CancellationToken.None
+                        ).ConfigureAwait(false);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[WS] Close error: {ex.Message}");
+                }
+                finally
+                {
+                    try { _ws.Abort(); } catch { }
+                    try { _ws.Dispose(); } catch { }
+
+                    _ws = null;
+                }
+            }
+
+            // 4. 清理 CTS
+            _cts?.Dispose();
+            _cts = null;
+
+            Debug.Log("[WS] Disconnected by client.");
         }
     }
 }

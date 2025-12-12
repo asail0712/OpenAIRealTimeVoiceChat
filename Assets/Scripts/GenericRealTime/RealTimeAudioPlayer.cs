@@ -25,6 +25,14 @@ namespace XPlan.OpenAI
 
         private bool _isPlaying = false;
 
+        // ===== 新增：這一輪播放用的 callback =====
+        private Action _onPlaybackCompleted;
+        private volatile bool _invokeCallbackOnMainThread   = false;
+
+        // ===== 播放結束檢測用 =====
+        private bool _responseFinishFlag                    = false;    // OnAIResponseFinish 設定
+        private bool _playbackDoneNotified                  = false;    // 避免重複觸發
+
         private void Awake()
         {
             if (!playbackSource)
@@ -37,6 +45,19 @@ namespace XPlan.OpenAI
 
             _dspSampleRate                              = AudioSettings.outputSampleRate;
             AudioSettings.OnAudioConfigurationChanged   += OnAudioConfigChanged;
+        }
+
+        private void Update()
+        {
+            if (_invokeCallbackOnMainThread)
+            {
+                playbackSource.Stop();
+                _onPlaybackCompleted?.Invoke();
+
+                _invokeCallbackOnMainThread = false;
+                _onPlaybackCompleted        = null;
+
+            }
         }
 
         private void OnDestroy()
@@ -69,9 +90,14 @@ namespace XPlan.OpenAI
         /// <summary>
         /// 開始播放（如果 queue 已經有資料，就會直接開始放）
         /// </summary>
-        public void StartPlay()
+        public void StartPlay(Action onFinished = null)
         {
-            _isPlaying = true;
+            _onPlaybackCompleted        = onFinished;
+
+            _isPlaying                  = true;
+            _playbackDoneNotified       = false;
+            _invokeCallbackOnMainThread = false;
+
             if (!playbackSource.isPlaying)
             {
                 playbackSource.Play();
@@ -109,8 +135,12 @@ namespace XPlan.OpenAI
         public void OnAIResponseStart(bool autoPlay = false)
         {
             ClearQueue();
-            _dupState   = 0;
-            _holdSample = 0f;
+            _dupState                   = 0;
+            _holdSample                 = 0f;
+
+            _responseFinishFlag         = false;
+            _playbackDoneNotified       = false;
+            _invokeCallbackOnMainThread = false;
 
             if (autoPlay)
             {
@@ -123,10 +153,16 @@ namespace XPlan.OpenAI
         /// </summary>
         public void OnAIResponseFinish(bool stopImmediately = false)
         {
+            _responseFinishFlag = true;
+
             if (stopImmediately)
             {
                 StopAndClear();
+
+                // 視需求決定要不要直接當作「播放結束」
+                _invokeCallbackOnMainThread = true;
             }
+
             // 否則就讓已經在 queue 裡的放完
         }
 
@@ -187,6 +223,17 @@ namespace XPlan.OpenAI
                     for (int c = 0; c < channels; c++)
                         data[i + c] = _holdSample;
                 }
+            }
+
+            // ====== 播放結束偵測 ======
+            // 條件：server 已宣告 Finish + queue 已經空 + 還沒通知過
+            if (_responseFinishFlag && _rxQueue.IsEmpty && !_playbackDoneNotified)
+            {
+                _playbackDoneNotified       = true;
+                _isPlaying                  = false;
+                
+                // audio thread 不能直接呼叫 callback，用 flag 丟回 main thread
+                _invokeCallbackOnMainThread = true;
             }
         }
     }
