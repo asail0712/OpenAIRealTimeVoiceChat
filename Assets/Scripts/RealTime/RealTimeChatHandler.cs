@@ -5,6 +5,7 @@ namespace XPlan.OpenAI
 {
     public class RealTimeChatHandler : MonoBehaviour
     {
+        [SerializeField] private RealTimeAudioPlayer audioPlayer;
         [SerializeField] private Text aiSpeechText;
         [SerializeField] private Text userSpeechText;
         [SerializeField] private Button speakBtn;
@@ -76,6 +77,8 @@ namespace XPlan.OpenAI
             Debug.Log(s);
 
             aiSpeechText.text = s + "▌"; // 小光標感
+
+            audioPlayer.StartPlay();
         }
 
         private void ReceiveUserTextFinish(string s)

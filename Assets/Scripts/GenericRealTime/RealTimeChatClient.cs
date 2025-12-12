@@ -42,11 +42,12 @@ namespace XPlan.OpenAI
 
     public class RealTimeChatClient : MonoBehaviour, IAIRealTimeChat
     {
+        [Header("External Audio Player")]
+        [Tooltip("用來播放 AI 語音的播放器元件")]
+        [SerializeField] private RealTimeAudioPlayer audioPlayer;
+
         [Tooltip("Mic device name. Leave empty to use default device.")]
         public string microphoneDevice = string.Empty; // 麥克風 (2- Usb Audio Device)
-
-        [Header("Playback")]
-        public AudioSource playbackSource; // attach an AudioSource (optional for TTS playback)
 
         [Header("Audio Settings")]
         [Tooltip("Preferred sample rate for mic capture. Actual mic rate comes from _micClip.frequency.")]
@@ -54,7 +55,7 @@ namespace XPlan.OpenAI
 
         [Header("Audio Settings")]
         [Tooltip("Preferred sample rate for mic capture. Actual mic rate comes from _micClip.frequency.")]
-        public bool bAutoConnect = false;
+        public bool autoConnect = false;
 
         // Send loop flags
         private volatile bool bStreamingMic;
@@ -75,15 +76,6 @@ namespace XPlan.OpenAI
         private const int TxFrameMaxMs = 40;
         private int _bytesPerMs => (sampleRate /* 24000 */ * 2 /*pcm16*/ ) / 1000;
 
-        // ===============================
-        // Internals - RX/playback
-        // ===============================
-        private readonly ConcurrentQueue<float> _rxQueue    = new ConcurrentQueue<float>(); // 24k mono float
-        private int _srcSampleRate                          = 24000;    // model output when pcm16
-        private int _dspSampleRate                          = 48000;    // audio device output
-        private float _holdSample;                                      // for 24k→48k duplication
-        private int _dupState;                                          // 0/1 alternating
-
         // temp buffers
         private float[] _floatBuf   = Array.Empty<float>(); // multi-channel
         private float[] _monoBuf    = Array.Empty<float>();  // mono
@@ -100,9 +92,8 @@ namespace XPlan.OpenAI
         private ClientWebSocket _ws;
         private CancellationTokenSource _cts;
         private readonly SemaphoreSlim _sendLock        = new SemaphoreSlim(1, 1);
-        private readonly ConcurrentQueue<Action> _main  = new ConcurrentQueue<Action>(); // 主執行緒回撥佇列
-
-        private void EmitOnMain(Action a) { if (a != null) _main.Enqueue(a); }
+        private readonly ConcurrentQueue<Action> _main  = new ConcurrentQueue<Action>(); // 主執行緒回撥佇列        
+        private Dictionary<string, string> headerDict   = new Dictionary<string, string>();
 
         // =============== Connection Callbacks ===============
         public event Action onConnected;            // 連線成功
@@ -116,17 +107,12 @@ namespace XPlan.OpenAI
         public event Action<string> userTextDone;
         public event Action<string> aiTextDone;
 
-        // =============== Websocket Header ===============
-        private Dictionary<string, string> headerDict = new Dictionary<string, string>();
-        public void AddHeader(string key, string value)
+        private async void Start()
         {
-            if(headerDict.ContainsKey(key))
+            if (autoConnect)
             {
-                headerDict[key] = value;
-            }
-            else
-            {
-                headerDict.Add(key, value);
+                // 連 WebSocket
+                await ConnectAsync();
             }
         }
 
@@ -138,38 +124,12 @@ namespace XPlan.OpenAI
             }
         }
 
-        private void Awake()
-        {
-            if (!playbackSource)
-            {
-                playbackSource              = gameObject.AddComponent<AudioSource>();
-                playbackSource.playOnAwake  = true;
-                playbackSource.loop         = true;   // feed audio via OnAudioFilterRead
-                playbackSource.spatialBlend = 0f;
-            }
-
-            // sample rate監控與設定
-            _dspSampleRate = AudioSettings.outputSampleRate;
-            AudioSettings.OnAudioConfigurationChanged += OnAudioConfigChanged;
-        }
-
-        private async void Start()
-        {
-            if(bAutoConnect)
-            {
-                // 連 WebSocket
-                await ConnectAsync();
-            }
-        }
-
         private void OnDestroy()
         {
             if (_micClip != null && Microphone.IsRecording(microphoneDevice))
             {
                 Microphone.End(microphoneDevice);
             }
-
-            AudioSettings.OnAudioConfigurationChanged -= OnAudioConfigChanged;
 
             try { _cts?.Cancel(); } catch { }
             try { _ws?.Abort(); } catch { }
@@ -206,12 +166,6 @@ namespace XPlan.OpenAI
             });
         }
 
-        private void OnAudioConfigChanged(bool deviceWasChanged)
-        {
-            _dspSampleRate = AudioSettings.outputSampleRate;
-            Debug.Log($"[Audio] DSP sampleRate={_dspSampleRate}, deviceChanged={deviceWasChanged}");
-        }
-
         // =============== UI Handlers ===============
 
         // 點一下：切換持續收音
@@ -236,7 +190,7 @@ namespace XPlan.OpenAI
         public async Task InterruptChat()
         {
             // 中斷處理
-            playbackSource.enabled = false;
+            audioPlayer?.PausePlay();
 
             await SendInterruptAsync(); // 通知伺服器中斷目前的 AI 播放
         }
@@ -245,13 +199,13 @@ namespace XPlan.OpenAI
 
         private void HandleAIResposeStart()
         {
-            playbackSource.enabled = true;
-            _rxQueue.Clear();
+            // 交給 audioPlayer
+            audioPlayer?.OnAIResponseStart(autoPlay: false); // 這裡先只清 buffer，不自動播放
         }
 
         private void HandleAIResposeFinish()
         {
-            //playbackSource.enabled = false;
+            audioPlayer?.OnAIResponseFinish(stopImmediately: false);
         }
 
         private void HandleAITranscript(string text)
@@ -276,19 +230,8 @@ namespace XPlan.OpenAI
 
         private void HandleAIAudio(byte[] bytes)
         {
-            int sampleCount = bytes.Length / 2;
-            var block       = new float[sampleCount];
-
-            for (int i = 0, si = 0; i < bytes.Length; i += 2, si++)
-            {
-                short s     = (short)(bytes[i] | (bytes[i + 1] << 8));
-                block[si]   = s / 32768f; // mono 24k
-            }
-
-            for (int i = 0; i < block.Length; i++)
-            {
-                _rxQueue.Enqueue(block[i]);
-            }
+            // 現在直接丟給 audioPlayer
+            audioPlayer?.EnqueuePcm16(bytes);
         }
 
         private void HandleAILog(DebugLevel lv, string logStr)
@@ -306,8 +249,6 @@ namespace XPlan.OpenAI
                     break;
             }
         }
-
-        // =============== Helpers ===============
 
         // ===============================
         // Mic controls
@@ -359,8 +300,6 @@ namespace XPlan.OpenAI
             _pcmBuf         = new byte[1];
 
             bStreamingMic   = true;
-
-            playbackSource.Play();
 
             Debug.Log($"[Mic] Device={microphoneDevice}, reqRate={sampleRate}, actualRate={_micClip.frequency}, samples={_clipSamples}, ch={_clipChannels}");
         }
@@ -527,56 +466,11 @@ namespace XPlan.OpenAI
         }
 
         // ===============================
-        // Playback (audio thread)
-        // ===============================
-        void OnAudioFilterRead(float[] data, int channels)
-        {
-            int dstRate = _dspSampleRate;
-
-            if (dstRate == _srcSampleRate * 2)
-            {
-                // Fast path: 24k -> 48k (duplicate every sample)
-                for (int i = 0; i < data.Length; i += channels)
-                {
-                    float sample;
-                    if (_dupState == 0)
-                    {
-                        if (!_rxQueue.TryDequeue(out sample))
-                        {
-                            sample = 0f;
-                        }
-                        _holdSample = sample; _dupState = 1;
-                    }
-                    else
-                    {
-                        sample = _holdSample; _dupState = 0;
-                    }
-                    for (int c = 0; c < channels; c++) data[i + c] = sample;
-                }
-            }
-            else
-            {
-                // Fallback: simple hold-based resampling (cheap and stable for speech)
-                double step = _srcSampleRate / Math.Max(1, dstRate);
-                double acc  = 0.0;
-                for (int i = 0; i < data.Length; i += channels)
-                {
-                    while (acc <= 0.0)
-                    {
-                        if (_rxQueue.TryDequeue(out _holdSample)) { }
-                        acc += 1.0;
-                    }
-                    acc -= step;
-                    for (int c = 0; c < channels; c++) data[i + c] = _holdSample;
-                }
-            }
-        }
-
-        // ===============================
         // WebSocket client
         // ===============================
         public bool IsConnected() => _ws != null && _ws.State == WebSocketState.Open;
-        
+        private void EmitOnMain(Action a) { if (a != null) _main.Enqueue(a); }
+
         // =============== Public Connect API ===============
         public async Task Connect()
         {
@@ -635,6 +529,18 @@ namespace XPlan.OpenAI
             {
                 _ws.Options.SetRequestHeader(kvp.Key, kvp.Value);
             }            
+        }
+
+        public void AddHeader(string key, string value)
+        {
+            if (headerDict.ContainsKey(key))
+            {
+                headerDict[key] = value;
+            }
+            else
+            {
+                headerDict.Add(key, value);
+            }
         }
 
         private async Task ReceiveLoopAsync()
