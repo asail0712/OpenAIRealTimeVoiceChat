@@ -33,6 +33,11 @@ namespace XPlan.OpenAI
         private bool _responseFinishFlag                    = false;    // OnAIResponseFinish 設定
         private bool _playbackDoneNotified                  = false;    // 避免重複觸發
 
+        // ===== 備份語音資料 =====
+        private float[] _latestFrame;
+        private int _latestChannels;
+        private readonly object _lockObj                    = new();
+
         private void Awake()
         {
             if (!playbackSource)
@@ -166,6 +171,25 @@ namespace XPlan.OpenAI
             // 否則就讓已經在 queue 裡的放完
         }
 
+        public bool TryGetLatestFrame(out float[] frame, out int channels)
+        {
+            lock (_lockObj)
+            {
+                if (_latestFrame == null)
+                {
+                    frame       = null;
+                    channels    = 0;
+                    return false;
+                }
+
+                // 這裡可以選擇「直接回 reference」或「複製一份」，
+                // 為了省 GC，建議直接回 reference，外面只讀不改
+                frame       = _latestFrame;
+                channels    = _latestChannels;
+                return true;
+            }
+        }
+
         /// <summary>
         /// 給 Unity audio thread 用的 callback
         /// </summary>
@@ -223,6 +247,16 @@ namespace XPlan.OpenAI
                     for (int c = 0; c < channels; c++)
                         data[i + c] = _holdSample;
                 }
+            }
+
+            // ⭐⭐ 關鍵：這裡「多做」一件事，把 data 複製出去給主執行緒用 ⭐⭐
+            lock (_lockObj)
+            {
+                if (_latestFrame == null || _latestFrame.Length != data.Length)
+                    _latestFrame = new float[data.Length];
+
+                Array.Copy(data, _latestFrame, data.Length);
+                _latestChannels = channels;
             }
 
             // ====== 播放結束偵測 ======
